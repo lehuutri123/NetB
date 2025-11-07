@@ -1,0 +1,1451 @@
+<!--
+
+    Licensed to the Apache Software Foundation (ASF) under one
+    or more contributor license agreements.  See the NOTICE file
+    distributed with this work for additional information
+    regarding copyright ownership.  The ASF licenses this file
+    to you under the Apache License, Version 2.0 (the
+    "License"); you may not use this file except in compliance
+    with the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing,
+    software distributed under the License is distributed on an
+    "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    KIND, either express or implied.  See the License for the
+    specific language governing permissions and limitations
+    under the License.
+
+-->
+
+<html><head>
+<title>Editor API</title>
+<link rel="stylesheet" href="@TOP@/resource-files/prose.css" type="text/css">
+</head><body>
+
+<p class="overviewlink"><a href="@TOP@/index.html">Overview</a></p>
+
+<h1>Javadoc</h1>
+
+Please see the
+
+{@link org.openide.text Javadoc }
+
+for further details; of greatest interest will be the documentation
+for
+
+{@link org.openide.text.NbDocument NbDocument }.
+
+
+<h1>Contents</h1>
+
+<ul>
+
+<li><a href="#overview">Overview</a>
+<ul>
+<li><a href="#typical-use">Typical use scenario</a>
+</ul>
+
+<li><a href="#accessing">Accessing an Open Document</a>
+<ul>
+<li><a href="#get-doc-obj">Getting the document object for a data object</a>
+<li><a href="#modification">Common operations on resulting document</a>
+</ul>
+
+<li><a href="#automation">Advanced Editor Automation</a>
+<ul>
+<li><a href="#auto-guard">Using guard blocks</a>
+<li><a href="#auto-ann">Using annotations</a>
+</ul>
+
+<li><a href="#loader">Loader Interactions with Guard Blocks</a>
+
+<li><a href="#new-editor">Implementing a Custom Editor</a>
+<ul>
+<li><a href="#create-ed-kit">Creating editor kit</a>
+<li><a href="#create-stydoc">Creating styled document</a>
+<li><a href="#handle-guard">Handling guards</a>
+<li><a href="#handle-lines">Lines and elements</a>
+<li><a href="#handle-ann">Handling annotations</a>
+<li><a href="#printing">Printing</a>
+<li><a href="#locking">Locking</a>
+<li><a href="#biases">Biases</a>
+<li><a href="#scrolling">Scrolling to display</a>
+<li><a href="#actions">Presentable actions</a>
+<li><a href="#undo">Undo/redo support</a>
+<li><a href="#cust">Customization</a>
+<li><a href="#install">Installing</a>
+</ul>
+
+</ul>
+
+
+
+
+<h1>Editor API</h1>
+
+<p>
+This document describes the NetBeans Editor API, attempting to give a
+summary of what you need to know about it for different purposes.
+</p>
+
+<div class="nonnormative">
+
+<p>The Open APIs only cover certain aspects of working with the
+editor. For example, you can open documents, modify them, add
+annotations, register editor kits you built from scratch, and so on.
+Some more specific capabilities that are frequently requested are
+<em>not</em> guaranteed by the Open APIs but <em>may</em> be possible
+using NetBeans modules which may have differing standards of API
+design, documentation, and compatibility from release to release. Here
+are some resources that may also be of interest:</p>
+
+<ul>
+
+    <li><p>The NetBeans editor module
+is the typical editor implementation. It is possible to use base
+classes in this module as a starting point for defining your own
+editor kits: syntax coloring, code completion, etc. for new languages
+and file formats. As of this writing, the details of how to add new
+editor kits from a NetBeans module are virtually undocumented, and
+compatibility is likely to be broken in future NetBeans releases, so
+do so at your own risk.</p></li>
+
+<li><p>The lexer module
+
+is planned to make creation of new editor kits easier.</p></li>
+
+
+</ul>
+
+</div>
+
+<h2 id="overview">Overview</h2>
+
+<p>The Editor API may be used at a first cut for two purposes: accessing
+editor-related functionality from within NetBeans for use by other
+modules; and implementing a custom editor that
+can be inserted into NetBeans as a module, replacing or supplementing
+the NetBeans-supplied one.</p>
+
+<div class="nonnormative">
+
+<h3 id="typical-use">Typical use scenario</h3>
+
+Here is an example sequence of events describing how an editor is used
+with Java source code and cooperates with the Form Editor.
+
+<ul>
+
+<li>The user either opens an existing form, or creates a new form (say
+for a <code>JFrame</code>) from template - in either case, there is a
+new <code>.java</code> <a
+href="@org-openide-filesystems@/org/openide/filesystems/FileObject.html">file</a> in the user's
+repository containing Java source, together with a <code>.form</code>
+file.
+
+<li>A "data object" is created for the form, using the "form" <a
+href="@org-openide-loaders@/org/openide/loaders/doc-files/api.html">data loader</a>; in this case
+there is a standard NetBeans <a
+href="@org-openide-modules@/org/openide/modules/doc-files/api.html">module</a>
+for the Form Editor. This module includes the
+implementation of the Form Editor; but it is invoked only through a
+loader, which recognizes a <code>.form</code> file associated with a
+<code>.java</code> file;
+when it finds them, it:
+
+<ul>
+
+<li>Creates <a href="@org-openide-nodes@/org/openide/nodes/doc-files/api.html">nodes</a> for the
+form, including a top-level node, a node for the form itself (with
+children corresponding to the AWT component structure), and a node for
+the class (with children corresponding to methods, variables, etc.).
+
+<li>Opens the form (<code>.form</code>) file in the Form Editor.
+
+<li>Asks to open the <code>.java</code> file in an editor.
+
+</ul>
+
+<li>If the <code>.java</code> file was already open in some editor
+window or pane, then this window/pane is reused and just given
+focus (i.e. a new
+
+{@link javax.swing.JEditorPane JEditorPane }
+
+is created, but using the same
+
+{@link javax.swing.text.EditorKit EditorKit }
+
+and
+
+{@link javax.swing.text.StyledDocument StyledDocument }).
+
+<p>If not, a new <code>JEditorPane</code> is
+
+{@link javax.swing.JEditorPane#getEditorKitForContentType(java.lang.String) asked }
+
+to create an editor for the Java source content type (typically
+<code>text/x-java</code>). Now, the Form Editor's data loader is an
+extension of the Java Source data loader; the Java loader <a
+href="#loader">specially treats</a> the request to load its content
+into an editor: it inserts most of the text straight into the
+<code>StyledDocument</code> just as you would expect, but also checks
+for special comments looking something like <code>//GEN-BEGIN:</code>
+in the source code, which are the markers used to indicate guarded
+areas in saved source code. When it finds one, rather than inserting
+the marker into the document, it uses
+
+{@link org.openide.text.NbDocument#insertGuarded(javax.swing.text.StyledDocument,int,java.lang.String) NbDocument.insertGuarded(...) }
+
+to insert the enclosed text area, making it read-only to the user.
+
+<li>The <code>JEditorPane</code> now has a <code>StyledDocument</code>
+suited to Java source code loaded into it. This document may be
+implemented by the standard NetBeans Editor, or it may be a <a
+href="#new-editor">custom editor</a>. The user may edit non-guarded
+parts of the document; attempted actions (like typing) that would
+affect guarded areas are prevented by the editor in use.
+
+<li>The user may make modifications to the form in the Form
+Editor. This form is of course linked to the open document, allowing
+the document to reflect needed code changes. The form editor does not
+actually need to read the document at all; whenever something is
+modified on the form, the form editor just replaces an existing
+guarded block with new, regenerated contents, or it deletes an
+existing block, or adds a new block just after an existing one. So if
+the user had foolishly made edits to a guarded area while the source
+file was on disk, those edits would simply be discarded upon being
+loaded into the Form Editor.
+
+<p>Note that the Form Editor directly or indirectly calls
+
+{@link javax.swing.text.Document#insertString(int,java.lang.String,javax.swing.text.AttributeSet) Document.insertString(...) }
+
+(or
+
+{@link org.openide.text.NbDocument#insertGuarded(javax.swing.text.StyledDocument,int,java.lang.String) NbDocument.insertGuarded(...) })
+
+and
+
+{@link javax.swing.text.Document#remove(int,int) Document.remove(...) }
+
+to do this work, so it is itself unaffected by guard blocks.
+
+<li>The user may explore the Java parse hierarchy as presented in the
+Explorer when expanding the class node for the form; from here,
+methods, variables, and so on in the code may be seen as attributed
+objects. If the user modifies one of these attributes, or uses a more
+complex JavaBean view of the class, the document is asked to make the
+corresponding update in the source; but in this case, the
+
+{@link org.openide.text.NbDocument#GUARDED guarded attribute}
+
+<em>is</em> checked, since the user should not be able to arbitrarily
+rename or otherwise affect members used by the Form Editor without its
+consent! NetBeans actions implementing such modifications will use
+
+{@link org.openide.text.NbDocument.WriteLockable#runAtomicAsUser(java.lang.Runnable) NbDocument.WriteLockable.runAtomicAsUser(...) }
+
+to make sure that the guard blocks are properly honored.
+
+<li>When the user is done with the form, he may close it; then he will
+be prompted to save to disk. If a save action is performed, the Java
+Data Object is responsible for looking for guard blocks in the editor
+and converting these back into comments like <code>//GEN-BEGIN:</code>
+before the text is written to file.
+
+</ul>
+
+</div>
+
+
+
+<h2 id="accessing">Accessing an Open Document</h2>
+
+Starting from other APIs, it is not difficult to make use of the
+Editor API to get access to an editor window displaying a particular
+file.
+
+<h3 id="get-doc-obj">Getting the document object for a data object</h3>
+
+Here is an example of how to find a file by name stored in some
+filesystem in the Repository; get its data object (assuming you do not
+already have its data object, or a node representing the data object);
+and get the Swing document to edit it, opening a new Editor window
+with that document if necessary. Naturally this example is somewhat
+long, because it demonstrates how to do all of this from
+scratch. Also, exception handling is not illustrated here.
+
+<pre>
+<span class="type">File</span> <span class="variable-name">f</span> = <span class="keyword">new</span> <span class="type">File</span>(<span class="string">"/home/me/sources/my/pkg/MyFile.java"</span>);
+<span class="type">FileObject</span> <span class="variable-name">fo</span> = FileUtil.fromFile(f)[0];
+<span class="type">DataObject</span> <span class="variable-name">d</span> = DataObject.find(fo);
+<span class="type">EditorCookie</span> <span class="variable-name">ec</span> = (<span class="type">EditorCookie</span>)d.getCookie(EditorCookie.<span class="keyword">class</span>);
+ec.{@link org.openide.cookies.EditorCookie#open() open }();
+<span class="type">StyledDocument</span> <span class="variable-name">doc</span> = ec.{@link org.openide.cookies.EditorCookie#openDocument() openDocument }();
+</pre>
+
+<h3 id="modification">Common operations on resulting document</h3>
+
+You can check such things as whether or not the file is modified in the Editor:
+
+<pre>
+if (ec.{@link org.openide.cookies.EditorCookie#isModified() isModified }()) ...
+</pre>
+
+Then see what the current contents of line 26 are (zero-based):
+
+<pre>
+int start={@link org.openide.text.NbDocument#findLineOffset(javax.swing.text.StyledDocument,int) NbDocument.findLineOffset }(doc, 25);
+int end=NbDocument.findLineOffset(doc, 26);
+String contents=doc.getText(start, end-start);
+</pre>
+
+And display this line in the Editor window:
+
+<pre>
+ec.{@link org.openide.cookies.LineCookie#getLineSet() getLineSet }().{@link org.openide.text.Line.Set#getCurrent(int) getCurrent }(25).{@link org.openide.text.Line#show(int) show }({@link org.openide.text.Line#SHOW_TRY_SHOW Line.SHOW_TRY_SHOW });
+</pre>
+
+Now insert a new line here after it:
+
+<pre>
+<span class="keyword">final</span> <span class="type">BadLocationException</span>[] <span class="variable-name">exc</span> = <span class="keyword">new</span> <span class="type">BadLocationException</span>[] {<span class="constant">null</span>};
+NbDocument.{@link org.openide.text.NbDocument#runAtomicAsUser(javax.swing.text.StyledDocument,java.lang.Runnable) runAtomicAsUser }(doc, <span class="keyword">new</span> <span class="type">Runnable</span>() {
+    <span class="keyword">public</span> <span class="type">void</span> <span class="function-name">run</span>() {
+        <span class="keyword">try</span> {
+            doc.insertString(NbDocument.findLineOffset(doc, 26),
+                             <span class="string">"// New text.\n"</span>,
+                             SimpleAttributeSet.EMPTY);
+        } <span class="keyword">catch</span> (<span class="type">BadLocationException</span> <span class="variable-name">e</span>) {
+            exc[0] = e;
+        }
+    }
+});
+<span class="keyword">if</span> (exc[0] != <span class="constant">null</span>) <span class="keyword">throw</span> exc[0];
+</pre>
+
+All done! Prompt to save the file, and close the editor window:
+
+<pre>
+ec.{@link org.openide.cookies.EditorCookie#close() close }();
+</pre>
+
+<h2 id="automation">Advanced Editor Automation</h2>
+
+For advanced modules on a level with the Form Editor or the
+Compiler and Debugger, it is necessary to take more complete control
+over the actions and content of an editor.
+
+<h3 id="auto-guard">Using guard blocks</h3>
+
+Manipulating guarded blocks should not be very difficult, if your
+application requires it. They are used by the FormEditor, but any
+module which needs to prevent the user from editing certain portions
+of a text document (typically because they will be mechanically
+recreated by other means), can do so.
+
+<ul>
+
+<li>To create a guard block over an existing area of text, you may use
+
+{@link org.openide.text.NbDocument#markGuarded(javax.swing.text.StyledDocument,int,int) NbDocument.markGuarded(...) };
+
+the guard block may subsequently be removed using
+
+{@link org.openide.text.NbDocument#unmarkGuarded(javax.swing.text.StyledDocument,int,int) NbDocument.unmarkGuarded(...) }.
+
+<p>Typically you will want to remember the positions of the guard
+blocks you added using a position, so that user edits in the vicinity
+of the guard block will be taken into consideration. You may create
+such a position using
+
+{@link org.openide.text.NbDocument#createPosition(javax.swing.text.Document,int,javax.swing.text.Position.Bias) NbDocument.createPosition(...) },
+
+and retrieve its current offset when needed using
+
+{@link javax.swing.text.Position#getOffset() Position.getOffset() }.
+
+<li>To insert a new guarded block of text, you may use
+
+{@link org.openide.text.NbDocument#insertGuarded(javax.swing.text.StyledDocument,int,java.lang.String) NbDocument.insertGuarded(...) }.
+
+<li>To change the contents of part of the document, without regard to
+the presence of guard blocks (this assumes you know what you are doing
+and what the guard blocks are being used for), you may use the
+standard Swing
+
+{@link javax.swing.text.Document#insertString(int,java.lang.String,javax.swing.text.AttributeSet) Document.insertString(...) }
+
+and
+
+{@link javax.swing.text.Document#remove(int,int) Document.remove(...) }.
+
+You probably want to use
+
+{@link org.openide.text.NbDocument#runAtomic(javax.swing.text.StyledDocument,java.lang.Runnable) NbDocument.runAtomic(...) }
+
+to prevent errors in threaded code.
+
+<p>To do the same sort of thing while preventing yourself from
+accidentally touching a guard block, i.e. if your module was not the
+creator of the guard block (or you are not even sure if there any in
+the document), please use
+
+{@link org.openide.text.NbDocument#runAtomicAsUser(javax.swing.text.StyledDocument,java.lang.Runnable) NbDocument.runAtomicAsUser(...) }
+
+instead.
+
+</ul>
+
+<h3 id="auto-ann">Using annotations</h3>
+
+<p>In order to provide richer interactions between the editor and
+other modules, the APIs provide for a system of <em>annotations</em>
+which are used for things like debugger breakpoints, erroneous lines,
+and so on. From an API perspective, anyone can create annotations and
+attach them to a document; the editor implementation should attempt to
+display these annotations as it sees fit, taking hints from the
+annotation provider.</p>
+
+<p>Using annotations on a document need not be difficult. Everything
+you need to do is to define the visual appearance of your annotation
+and to provide a class which will represent it programmatically. For
+example, if you are writing a module which interacts with an open
+document containing some sort of program code, and the user has made a
+syntax error in the code which you were able to detect and want to
+point out, you may want to mark the line or part of the line as
+"erroneous". To achieve this you must:</p>
+
+<ol>
+
+<li>Describe the appearance of your annotation. This is the so-called
+<em>annotation type</em> which consist of attributes like colors and
+so on. After you have defined the annotation type you will be able to
+create document annotations which will reference this annotation type.
+Definition of an annotation type involves creation of an XML file with
+the format specified by a
+
+<a href="http://www.netbeans.org/dtds/annotation-type-1_0.dtd">standard DTD</a>.
+
+This XML file must be registered in your module installation layer in
+the folder <samp>Editors/AnnotationTypes</samp>. Here is an example
+XML file
+<samp>Editors/AnnotationTypes/org-nb-modules-foo-some-annotation.xml</samp>
+(the file name within this folder is arbitrary but should be
+distinctive to prevent collisions between modules):
+
+<pre>
+&lt;?<span class="keyword">xml</span> <span class="variable-name">version</span>=<span class="string">"1.0"</span> <span class="variable-name">encoding</span>=<span class="string">"UTF-8"</span>?&gt;
+&lt;!<span class="keyword">DOCTYPE</span> <span class="type">type</span> <span class="keyword">PUBLIC</span>
+          <span class="string">"-//NetBeans//DTD annotation type 1.0//EN"</span>
+          <span class="string">"http://www.netbeans.org/dtds/annotation-type-1_0.dtd"</span>&gt;
+&lt;<span class="function-name">type</span> <span class="variable-name">name</span>=<span class="string">"org-nb-modules-foo-some-annotation"</span>
+      <span class="variable-name">description_key</span>=<span class="string">"LBL_some-annotation"</span>
+      <span class="variable-name">localizing_bundle</span>=<span class="string">"org.nb.modules.foo.Bundle"</span>
+      <span class="variable-name">visible</span>=<span class="string">"true"</span> 
+      <span class="variable-name">glyph</span>=<span class="string">"nbresloc:/org/nb/modules/foo/some-annotation-glyph.gif"</span>
+      <span class="variable-name">highlight</span>=<span class="string">"#FFFF00"</span>
+      <span class="variable-name">type</span>=<span class="string">"line"</span>/&gt;
+</pre>
+
+<p>As you can see the definition of the annotation type consists of the highlight
+color; the glyph icon which could be shown in the left margin of the editing
+area - the <em>glyph gutter</em>; the localized name; and so on. For more details
+about each field in the DTD see
+
+<a href="#auto-ann-detail">below</a>.</p></li>
+
+<li>Extend the
+
+{@link org.openide.text.Annotation Annotation }
+
+abstract class and define your own annotation. You must specify the
+<em>type</em> - which matches the code name given in the XML
+description - and a short description, which can form tool-tip text for
+the annotation. For example:
+
+<pre>
+<span class="keyword">public</span> <span class="keyword">final</span> <span class="keyword">class</span> <span class="type">SomeAnnotation</span> <span class="keyword">extends</span> <span class="type">Annotation</span> {
+    <span class="keyword">private</span> <span class="keyword">final</span> <span class="type">String</span> <span class="variable-name">error</span>;
+    <span class="keyword">public</span> <span class="type">SomeAnnotation</span>(<span class="type">String</span> <span class="variable-name">error</span>) {
+        <span class="keyword">this</span>.error = error;
+    }
+    <span class="keyword">public</span> <span class="type">String</span> {@link org.openide.text.Annotation#getAnnotationType() getAnnotationType }() {
+        <span class="keyword">return</span> <span class="string">"org-nb-modules-foo-some-annotation"</span>;
+    }
+    <span class="keyword">public</span> <span class="type">String</span> {@link org.openide.text.Annotation#getShortDescription() getShortDescription }() {
+        <span class="comment">// Localize this with NbBundle:</span>
+        <span class="keyword">return</span> <span class="string">"The error was: "</span> + error;
+    }
+}
+</pre>
+
+Note that you can return the tooltip text asynchronously, on demand,
+or dynamically: you may return <code>null</code> for no tooltip, and
+you may later return a new or changed tooltip - just use:
+
+<pre>
+firePropertyChange(PROP_SHORT_DESCRIPTION, <span class="constant">null</span>, <span class="constant">null</span>);
+</pre>
+
+to inform the editor of the change. The tooltip should be refreshed
+on-screen.
+
+<li>Finally, attach an annotation instance you make to some
+
+{@link org.openide.text.Annotatable Annotatable }
+
+object. Normally this will be a
+
+{@link org.openide.text.Line Line }
+
+representing a whole line of text, or a
+
+{@link org.openide.text.Line.Part Line.Part }
+
+representing a section of a line. For example:
+
+<pre>
+<span class="comment">// Given error output like: "pkg/Name.java:123: You made a mistake"
+</span><span class="type">FileObject</span> <span class="variable-name">fileWithError</span> = fs.findResource(<span class="string">"pkg/Name.java"</span>);
+<span class="type">DataObject</span> <span class="variable-name">objWithError</span> = DataObject.find(fileWithError);
+{@link org.openide.cookies.LineCookie LineCookie } <span class="variable-name">cookie</span> = (<span class="type">LineCookie</span>)objWithError.getCookie(LineCookie.<span class="keyword">class</span>);
+{@link org.openide.text.Line.Set Line.Set } <span class="variable-name">lineSet</span> = cookie.getLineSet();
+<span class="keyword">final</span> {@link org.openide.text.Line Line } <span class="variable-name">line</span> = lineSet.{@link org.openide.text.Line.Set#getOriginal(int) getOriginal }(123);
+<span class="keyword">final</span> <span class="type">Annotation</span> <span class="variable-name">ann</span> = <span class="keyword">new</span> <span class="type">SomeAnnotation</span>(<span class="string">"You made a mistake"</span>);
+ann.{@link org.openide.text.Annotation#attach(org.openide.text.Annotatable) attach }(line);
+</pre>
+
+</li>
+
+<li>
+
+<div class="nonnormative">
+
+<p>In this example the user may correct the erroneous line, or at
+least do something to it - in this case we assume that the annotation
+is no longer needed, and should be removed. It is a simple call to do
+this; of course you need to know when it is appropriate, so for
+example:</p>
+
+<pre>
+line.addPropertyChangeListener(<span class="keyword">new</span> <span class="type">PropertyChangeListener</span>() {
+    <span class="keyword">public</span> <span class="type">void</span> <span class="function-name">propertyChange</span>(<span class="type">PropertyChangeEvent</span> <span class="variable-name">ev</span>) {
+        <span class="type">String</span> <span class="variable-name">type</span> = ev.getPropertyName();
+        <span class="keyword">if</span> (type == <span class="constant">null</span> || type == Annotatable.PROP_TEXT) {
+            <span class="comment">// User edited the line, assume error should be cleared.
+</span>            ann.detach();
+            line.removePropertyChangeListener(<span class="keyword">this</span>);
+        }
+    }
+});
+</pre>
+
+</div>
+
+</li>
+
+</ol>
+
+<p>It is possible that there might be more than one annotation on the
+same line. In this case it depends on the capabilities of the editor
+how the annotations will be displayed. The simplest scenario is that
+only one annotation is visible at time and the user can cycle through
+them. If this is the case it may be helpful to force the editor to
+move your annotation in front of any others:</p>
+
+<pre>
+ann.{@link org.openide.text.Annotation#moveToFront() moveToFront }();
+</pre>
+
+<p>NetBeans presents GUI settings to the user in which it is possible to
+customize the attributes of annotation types - for example, foreground
+and background color. Remember however that some editor implementations
+may find it difficult or impossible to accurately display all of these
+settings (for example display of arbitrary glyphs may be infeasible).</p>
+
+<h4 id="auto-ann-detail">Detailed description of annotation XML files</h4>
+
+Attributes of the <code>&lt;type&gt;</code> element are:
+
+<dl>
+
+<dt><code>name</code></dt>
+
+<dd>Unique non-localized name of the annotation type. Should match the
+result of <code>Annotation.getAnnotationType()</code>.</dd>
+
+<dt><code>description_key</code></dt>
+
+<dd>Bundle key for the localized name of the annotation type. This
+name is shown in annotation settings as the name of the annotation
+type.</dd>
+
+<dt><code>localizing_bundle</code></dt>
+
+<dd>Name of the bundle (dot-separated and sans extension or locale
+suffix) which contains the localized annotation name under the
+<code>description_key</code>.</dd>
+
+<dt><code>visible</code></dt>
+
+<dd>Whether the annotation type is visible or not.</dd>
+
+<dt><code>glyph</code></dt>
+
+<dd>URL of the glyph icon. Typically this would use the
+<code>nbresloc</code> protocol to access module resources and
+automatically localize them. A 16x16 GIF is common.</dd>
+
+<dt><code>highlight</code></dt>
+
+<dd>RGB value of the highlight color.</dd>
+
+<dt><code>foreground</code></dt>
+
+<dd>RGB value of the foreground color. If the color is not specified,
+the line's normal text color is inherited.</dd>
+
+<dt><code>type</code></dt>
+
+<dd>Style of annotation. Currently two styles are permitted:
+<code>line</code> (full-line annotation) and <code>linepart</code>
+(may be applied to a column range within a line).</dd>
+
+<dt><code>actions</code></dt>
+
+<dd>The name of a subfolder (rooted from
+<samp>Editors/AnnotationTypes/</samp>) in which <em>actions</em> for
+this annotation type may be specified. The editor may present these
+actions to the user when the annotation glyph is right-clicked, for
+example. The actions may be defined by
+
+<a href="@org-openide-actions@/org/openide/actions/doc-files/api.html#adv-install">listing instances</a>:
+
+<pre>
+&lt;<span class="function-name">folder</span> <span class="variable-name">name</span>=<span class="string">"YourAnnotationTypeActions"</span>&gt;
+  &lt;<span class="function-name">file</span> <span class="variable-name">name</span>=<span class="string">"org-foo-BarAction.instance"</span>/&gt;
+&lt;/<span class="function-name">folder</span>&gt;
+</pre>
+</dd>
+
+<dt><code>severity</code></dt>
+
+<dd>Severity of this annotation. Allowed values are <code>error</code>,
+<code>warning</code>, <code>ok</code> and <code>none</code>. Annotations with severity
+other then <code>none</code> will be shown in the Error Stripe using default color
+or color specified in <code>custom_sidebar_color</code>. Default value is <code>none</code>.
+</dd>
+
+<dt><code>custom_sidebar_color</code></dt>
+
+<dd>A color which should be used when showing this annotation in the Error Stripe.
+Specify this color if the default color derived from the <code>severity</code> is
+not feasible. Note that this setting has no effect if <code>severity</code>
+is set to <code>none</code>.
+</dd>
+
+<dt><code>browseable</code></dt>
+
+<dd>Whether this annotation should be "browseable" using action like Show Next Error.
+Valid values are <code>true</code> and <code>false</code>, default is <code>false</code>.
+</dd>
+
+<dt><code>priority</code></dt>
+
+<dd>Priority of this annotation with respect to other annotations with the same severity.
+Valid values are integer numbers. Default is 0.
+</dd>
+
+</dl>
+
+<p>The annotation <code>&lt;type&gt;</code> may also contain the
+<code>&lt;combinations&gt;</code> element - a definition of annotation
+combinations. If two or more annotations from the same module (or
+otherwise mutually known) are on the same line it might make sense to
+combine them into one annotation visually. For example, if a debugger
+module attached a breakpoint to a line and the current program counter
+reached the same line, it is more pleasant to show a combination of
+these two annotations rather than two separate annotations. This can
+be accomplished using a combination definition. A combined annotation
+type is otherwise normal (it may have a glyph icon and colors), but it
+also contains the definition of annotation types which are subsumed by
+this type. For example the combination of program counter with
+breakpoint could be defined as follows:</p>
+
+<pre>
+&lt;<span class="function-name">combinations</span> <span class="variable-name">tiptext_key</span>=<span class="string">"PC_BREAKPOINT_COMBINATION_TOOLTIP_TEXT"</span>&gt;
+  &lt;<span class="function-name">combine</span> <span class="variable-name">annotationtype</span>=<span class="string">"NameOfTheBreakpointAnnotationType"</span>/&gt;
+  &lt;<span class="function-name">combine</span> <span class="variable-name">annotationtype</span>=<span class="string">"NameOfTheCurrentPCAnnotationType"</span>/&gt;
+&lt;/<span class="function-name">combinations</span>&gt;
+</pre>
+
+<p>It is the responsibility of the editor to display combinations
+where the criteria for combinations as defined in available annotation
+types are met.</p>
+
+<p>Attributes of the <code>&lt;combinations&gt;</code> element
+are:</p>
+
+<dl>
+
+<dt><code>tiptext_key</code></dt>
+
+<dd>Bundle key for the localized tooltip text of the combining
+annotation. The same bundle is used as was specified in
+<code>description_key</code> on <code>&lt;type&gt;</code>. Since
+multiple annotation types are being combined, each of which might have
+its own tooltip, the combined annotation has just a static tooltip
+which might explain that several annotations are combined in it.</dd>
+
+<dt><code>order</code></dt>
+
+<dd>If necessary, the order in which the combinations should be
+processed can be specified. This might be useful for more complicated
+combinations. If the value is not specified, the combination is added
+to the end of the list.</dd>
+
+<dt><code>min_optionals</code></dt>
+
+<dd>This is related to the attribute <code>optional</code> of the
+<code>&lt;combine/&gt;</code> element. The combination is defined as a
+list of annotation types to be combined. To make creation of the
+combination more flexible, some annotation types can be optional
+(<code>optional</code> attribute on <code>&lt;combine/&gt;</code>).
+<code>min_optionals</code> is then used to specify the minimum number
+of optional annotation types which must be found to make the
+combination valid. For example, you may have have a conditional
+breakpoint and disabled breakpoint and wish to combine either of them
+with the current program counter. You can define it as follows:
+
+<pre>
+&lt;<span class="function-name">combinations</span> <span class="variable-name">tiptext_key</span>=<span class="string">"COMBINATION_TOOLTIP_TEXT"</span> <span class="variable-name">min_optionals</span>=<span class="string">"1"</span>&gt;
+  &lt;<span class="function-name">combine</span> <span class="variable-name">annotationtype</span>=<span class="string">"debugger-disabledbreakpoint"</span> <span class="variable-name">optional</span>=<span class="string">"true"</span>/&gt;
+  &lt;<span class="function-name">combine</span> <span class="variable-name">annotationtype</span>=<span class="string">"debugger-conditionalbreakpoint"</span> <span class="variable-name">optional</span>=<span class="string">"true"</span>/&gt;
+  &lt;<span class="function-name">combine</span> <span class="variable-name">annotationtype</span>=<span class="string">"debugger-currentpc"</span>/&gt;
+&lt;/<span class="function-name">combinations</span>&gt;
+</pre>
+
+This way you specify that both breakpoints are optional, but that at
+least one must be found to make the combination succeed.</dd>
+
+</dl>
+
+The <code>&lt;combinations&gt;</code> element can contain only
+<code>&lt;combine/&gt;</code> elements (one for each annotation type)
+and they can have these attributes:
+
+<dl>
+
+<dt><code>annotationtype</code></dt>
+
+<dd>Name of the annotation which is subsumed by this combination;
+matches <code>name</code> on <code>&lt;type&gt;</code>.</dd>
+
+<dt><code>absorb_all</code></dt>
+
+<dd>Whether all occurrences of this annotation type should be absorbed
+by this combination or only one. This might be useful in case there
+are for example multiple breakpoints on the same line.</dd>
+
+<dt><code>optional</code></dt>
+
+<dd>Whether this annotation type is optional for the combination or
+not.</dd>
+
+<dt><code>min</code></dt>
+
+<dd>Minimum count of annotations of this annotation type which must be
+on the line for the combination to match with this type. This can be
+used to define combinations such as collapsed multiple
+breakpoints.</dd>
+
+</dl>
+
+<h2 id="loader">Loader Interactions with Guard Blocks</h2>
+
+The NetBeans-supplied
+
+<a href="@org-openide-loaders@/org/openide/loaders/doc-files/api.html">data object</a>
+
+for Java source code automatically sets up guard blocks in the source
+documents it opens, if they contain the magic tokens in comments which
+delimit guard blocks on disk. So, if you are working with Java
+sources, you need do nothing special to load and save guarded
+documents; you may set guard blocks on them in memory, and this will
+be retained; or you may add the special tokens to them on disk,
+triggering guard block creation when the file is opened.
+
+<p>If you would like to add something akin to guard blocks to a custom
+file type handled by your module, you will need to insert the
+appropriate hooks. The best thing to do is to subclass
+
+<a href="@org-openide-loaders@/org/openide/text/EditorSupport.html"><code>EditorSupport</code></a>,
+
+and use this subclass to implement cookies such as
+
+{@link org.openide.cookies.EditorCookie EditorCookie }.
+
+Now just provide appropriate implementations of
+
+{@link org.openide.text.CloneableEditorSupport#loadFromStreamToKit(javax.swing.text.StyledDocument,java.io.InputStream,javax.swing.text.EditorKit) CloneableEditorSupport.loadFromStreamToKit(...) }
+
+(to interpret special markings in the saved file and convert them into document attributes); and
+
+{@link org.openide.text.CloneableEditorSupport#saveFromKitToStream(javax.swing.text.StyledDocument,javax.swing.text.EditorKit,java.io.OutputStream) CloneableEditorSupport.saveFromKitToStream(...) }
+
+(to translate these attributes back into ASCII markings).
+
+
+
+<h2 id="new-editor">Implementing a Custom Editor</h2>
+
+It is possible to integrate a custom editor (presumably for textual
+content types) into NetBeans, in place of the default
+editor. The basic requirement is that it conform to the Swing
+EditorKit conventions. The Swing Text system is rather complex, so if
+you are not familiar with it you should look at <a
+href="https://docs.oracle.com/javase/tutorial/uiswing/components/text.html">Using
+the Swing Text Package</a>.
+
+<p>Beyond being a generic EditorKit, there are two significant pieces of
+functionality used by NetBeans which the editor should support if at
+all possible:
+
+<ul>
+
+<li>Be able to mark NetBeans-supplied blocks of text as read-only, and
+prevent the user from editing or removing these blocks.
+
+<li>Be able to mark certain lines of the document (or parts of lines)
+with NetBeans-supplied <em>annotations</em>, e.g. background color, gutter
+glyphs, or as much as feasible, and change these display markings upon
+request.
+
+</ul>
+
+<h3 id="create-ed-kit">Creating editor kit</h3>
+
+You should not need to do anything special to create the editor kit
+beyond what is normally required by Swing.
+
+<h3 id="create-stydoc">Creating styled document</h3>
+
+You will need to create an implementation of
+
+{@link javax.swing.text.StyledDocument javax.swing.text.StyledDocument }
+
+to hold the content of the buffer being edited.
+
+<p>Actually, you could get away with a plain
+
+{@link javax.swing.text.Document Document }
+
+if you really wanted, but you would be unable to support guard blocks
+and would have a harder time supporting annotations and line numbering; while this would probably
+suffice for an editor that was not to be used on Java source code, in
+general it is very much recommended that <code>StyledDocument</code>
+be used instead<!--you only need to implement a few aspects of styling
+pertaining to these two issues, so full support for changing font and
+so on is completely optional-->.
+
+<h3 id="handle-guard">Handling guards</h3>
+
+This is really the central problem in creating a compliant editor. If
+you want to completely skip this step, it is possible to return a
+plain <code>Document</code> from the registered editor kit; however
+this will not support guards (or NetBeans attributes either), and so if the
+user edits what should have been a guarded block, they may cause
+errors in the code, and their edits may be overwritten by NetBeans. If
+you implement <code>StyledDocument</code>, it is assumed you are
+handling guard blocks, but again it is up to you to actually do so
+correctly - NetBeans cannot determine this.
+
+<p>There is very little to the way NetBeans indicates
+guarding. Essentially, it is just a character attribute, {@link org.openide.text.NbDocument#GUARDED NbDocument.GUARDED },
+which will be set to <code>Boolean.TRUE</code> for guarded characters,
+and <code>Boolean.FALSE</code> (or unset) for others; it is typically
+placed on the document by means of the
+
+{@link org.openide.text.NbDocument#markGuarded(javax.swing.text.StyledDocument,int,int) NbDocument.markGuarded(...) }
+
+and
+
+{@link org.openide.text.NbDocument#unmarkGuarded(javax.swing.text.StyledDocument,int,int) NbDocument.unmarkGuarded(...) }
+
+methods, which just call
+
+{@link javax.swing.text.StyledDocument#setCharacterAttributes(int,int,javax.swing.text.AttributeSet,boolean) StyledDocument.setCharacterAttributes(...) }.
+
+Very likely you will want to override this method, calling its
+superclass method but first checking to see if the attribute setting
+mentions <code>GUARDED</code>, whether setting it to <code>TRUE</code>
+or <code>FALSE</code>, and if so keeping track in another data
+structure of which ranges of characters are currently guarded or not;
+or you might already have a good way of keeping track of attributes in
+general and would rather just query this attribute when it is
+needed. If overriding <code>setCharacterAttributes</code> for this
+purpose, also remember to check the attributes on
+
+{@link javax.swing.text.Document#insertString(int,java.lang.String,javax.swing.text.AttributeSet) insertString },
+
+etc.
+
+<p>Note that currently guarded areas always consist of entire lines or
+sets of lines, so if you make this assumption your editor will be
+acceptable - but please handle sub-line granularity of guard blocks if
+you can do so easily, in case this situation changes. Along the same
+lines, you should make sure that users may only insert a newline
+immediately before a guarded block, and not any other character, for
+otherwise a half-guarded line would be created.
+
+<p>It is important to understand that the guarded attribute applies
+<em>only</em> to user modifications, i.e. those undertaken in the
+context of a user-initiated Swing action, or by
+
+{@link org.openide.text.NbDocument#runAtomicAsUser(javax.swing.text.StyledDocument,java.lang.Runnable) NbDocument.runAtomicAsUser(...) }.
+
+Internal NetBeans module code may freely insert or remove text (typically using
+
+{@link org.openide.text.NbDocument#insertGuarded(javax.swing.text.StyledDocument,int,java.lang.String) NbDocument.insertGuarded(...) }
+
+and <code>Document.remove(...)</code>). For example, this would be
+done by the Form Editor component while adding a new event
+handler. The editor implementation should permit such programmatic
+inserts and removes, while corresponding user actions must be
+forbidden.
+
+<p>It is preferable, though optional, for the editor to visually mark
+guarded areas, say with a special background color. It is your
+responsibility to choose a color or another appearance for this
+purpose, however. Possibly NetBeans will specify a
+
+{@link javax.swing.text.StyleConstants.ColorConstants#Background StyleConstants.ColorConstants.Background }
+
+attribute describing which color will actually be used, and make this
+color settable in a control panel, but assume that you need to
+colorize based on this attribute yourself.</p>
+
+<div class="nonnormative">
+
+<h4>The recommended way to handle guards</h4>
+
+It is highly recommended that all of the Swing actions (such as those
+returned by
+
+{@link javax.swing.text.EditorKit#getActions() EditorKit.getActions() })
+
+applicable to your editor kit be reviewed for the possibility that
+they might attempt to change the content of the document (so, not only
+character inserts but search-and-replace, block paste, etc.). Any that
+do perform some kind of mutation should be <em>reimplemented</em> (or
+a wrapper written for them) so that they check to make sure that a
+guarded block is not being violated.
+
+<p>Even better, whenever possible an action should be disabled when it
+can easily be determined in advance that it would be in violation if
+performed at that time. As an example, if the user moves the caret
+into the middle of a guarded block, it would be much preferable for
+the editor to disable "Paste" (say, on a right-click context menu) for
+the time being, rather than permitting a Paste action to be invoked
+but then displaying an error dialog or beeping!
+
+<h4>The cheap way to handle guards</h4>
+
+If you think the recommended path is too much work, you can try a
+cheaper trick - but this is not recommended, and we do not guarantee
+that it is even possible to do satisfactorily. This applies only to
+people who are trying to adapt an existing
+<code>StyledDocument</code>, such as Swing's
+
+{@link javax.swing.text.DefaultStyledDocument DefaultStyledDocument },
+
+which already has a full implementation of important things but no
+recognition of guard blocks.
+
+<p>The idea is to first get a list of all
+
+{@link javax.swing.Action actions }
+
+which might involve buffer modification - or, to be conservative, just
+all actions. For each of these, create a new action which calls the
+original
+
+{@link java.awt.event.ActionListener#actionPerformed(java.awt.event.ActionEvent) actionPerformed },
+
+but "dynamically binds" some special flag stored with the document to
+true - dynamic binding here means that it should be restored (turned
+back off) in a <code>finally</code> block, and also that its value
+should be specific to the executing thread (and its children,
+perhaps). This flag indicates that operations are currently being
+performed from a user action.
+
+<p>Override the <code>insertString(...)</code> and <code>remove</code>
+methods. They should check the flag just mentioned. If it is turned
+off, just call the superclass method normally. If it is turned on,
+check whether the requested insertion or removal is affecting a
+guarded area (insertion within, or removal within or overlapping). If
+not, again call the superclass method. If there is an attempted
+violation, you might do one or more of the following:
+
+<ul>
+
+<li> Not perform the insertion/removal, and just silently return.
+
+<li> Throw a
+
+{@link javax.swing.text.BadLocationException javax.swing.text.BadLocationException }
+
+and see what happens. Since the original action cannot ignore this
+exception (since <code>actionPerformed</code> does not have any
+throws), it must do something - currently, it seems the Swing actions
+simply beep.
+
+<li>Try to run a beep action to alert the user (using
+
+{@link java.awt.Toolkit#beep() Toolkit.beep() }).
+
+This would probably need to be done with
+
+{@link javax.swing.SwingUtilities#invokeLater(java.lang.Runnable) SwingUtilities.invokeLater(...) }.
+
+</ul>
+
+<p>Now bind all invocation objects (such as keymaps) to the new "wrapper" actions.
+Note that just returning them from the editor kit may not suffice.
+
+<p>If you go to the trouble of identifying specifically which actions
+could cause a violation, and under what circumstances they would or
+would not do so, then you could make specific wrappers that could
+disable actions, or safely invoke them only when possible, calling the
+original action if all is well - this is just one way to do the
+recommended implementation.
+
+<h4>Testing guard blocks</h4>
+
+If you are not able to test live in NetBeans, try doing something like this:
+
+<p><code>
+SimpleAttributeSet sas=new SimpleAttributeSet();<br>
+sas.addAttribute(NbDocument.GUARDED, Boolean.TRUE);<br>
+doc.setCharacterAttributes(0, 100, sas, false);
+</code>
+
+<p>Now verify that modification attempts in this block are disabled.
+
+</div>
+
+<h3 id="handle-lines">Lines and elements</h3>
+
+<p>You should make sure that lines in the editor are separated by
+exactly one text character - a newline. The APIs may rely on this to
+count character positions during parsing, so that this functionality
+may be efficient.</p>
+
+<p>Furthermore you should ensure that the
+
+{@link javax.swing.text.Document#getDefaultRootElement() default root element}
+
+of the document has child elements corresponding to all text lines;
+and if using <code>StyledDocument</code>, that
+
+{@link javax.swing.text.StyledDocument#getParagraphElement(int) "paragraph" elements}
+
+again correspond to text lines. Proper use of elements corresponding
+to lines will enable the APIs to accurately translate between buffer
+offsets and line numbers. It is fine to have additional element
+structures not corresponding to lines so long as the two conditions
+above are met.</p>
+
+<h3 id="handle-ann">Handling annotations</h3>
+
+An editor must do two things to support annotations:
+
+<ul>
+
+<li>Implement the <code>NbDocument.Annotatable</code> interface.</li>
+
+<li>Implement parsing of annotation type XML files.</li>
+
+</ul>
+
+<h4><code>NbDocument.Annotatable</code></h4>
+
+This
+
+{@link org.openide.text.NbDocument.Annotatable interface }
+
+has two methods. One adds an annotation to the document:
+
+<pre>
+<span class="keyword">public</span> <span class="type">void</span> <span class="function-name">addAnnotation</span>(<span class="type">Position</span> <span class="variable-name">startPos</span>, <span class="type">int</span> <span class="variable-name">length</span>, <span class="type">Annotation</span> <span class="variable-name">annotation</span>);
+</pre>
+
+The method is called with a <code>Position</code> in the document; the
+length of the annotation (if the annotation is of the whole-line type,
+the length will be <code>-1</code>); and the annotation instance. Now
+it is the responsibility of editor to collect all annotations for the
+document and to display them properly. It may be helpful to take
+advantage of <code>StyledDocument</code> for changing the style of the
+line (or part of the line). As for the glyph icon, it is fully up to
+the editor how to represent it (if at all). The NetBeans standard
+editor displays it in the left gutter.
+
+<p>The second method removed an annotation previously added:
+
+<pre>
+<span class="keyword">public</span> <span class="type">void</span> <span class="function-name">removeAnnotation</span>(<span class="type">Annotation</span> <span class="variable-name">annotation</span>);
+</pre>
+
+This method will be called when the annotation is programmatically
+detached, or the document is about to be closed.
+
+<p>The editor should combine annotation types where requested if this
+behavior is supported.</p>
+
+<h4>Annotation type XML files</h4>
+
+As for visual attributes of annotations, the editor should parse
+the XML files in the <samp>Editors/AnnotationTypes/</samp> directory.
+The NetBeans standard editor can serve as a source of examples for how to do this.
+In the future there may be shared parsing support.
+
+<h3 id="printing">Printing</h3>
+
+<p>If you want your editor to support printing of its contents,
+you might just provide no special support. In this case,
+printing should be able to work with plain text. If you have a styled
+document, it is possible that NetBeans will be able to run through the
+entire contents of the document; for each paragraph, retrieve its
+<code>Style</code>, and for each character, its attribute set; and
+then attempt to convert these (Swing) formatting specifications into
+(AWT) attributed character descriptions, for purposes of printing.
+
+<p>However, this process could be rather slow; is not terribly exact;
+and may not be implemented. To better support printing, it is
+desirable for the <code>StyledDocument</code> to implement
+
+{@link org.openide.text.NbDocument.Printable org.openide.text.NbDocument.Printable },
+
+which will allow it to specify exactly how it wants to be printed. The
+method
+
+{@link org.openide.text.NbDocument.Printable#createPrintIterators() NbDocument.Printable.createPrintIterators(...) }
+
+should return a list of
+
+{@link java.text.AttributedCharacterIterator java.text.AttributedCharacterIterator }s,
+
+providing attributes taken from
+
+{@link java.awt.font.TextAttribute java.awt.font.TextAttribute }.
+
+<p>Also, if your document supports either
+
+{@link java.awt.print.Printable java.awt.print.Printable }
+
+or
+
+{@link java.awt.print.Pageable java.awt.print.Pageable },
+
+then these interfaces will be used to perform the printing
+directly. You should only need to do this if attributed characters do
+not satisfactorily capture everything that you are interested in
+printing - for example, if your editor is working on HTML and it is
+desired to print embedded images.
+
+<h3 id="locking">Locking</h3>
+
+It is desirable for your <code>StyledDocument</code> implementation to
+be able to lock the document against write access, as this will make
+certain operations (performed by NetBeans, not in response to user
+events) more reliable and safer. In order to do this, please
+implement
+
+{@link org.openide.text.NbDocument.WriteLockable org.openide.text.NbDocument.WriteLockable }
+
+and its
+
+{@link org.openide.text.NbDocument.WriteLockable#runAtomic(java.lang.Runnable) runAtomic(...) }
+
+method. The <code>Runnable</code> passed in this way should be
+executed with all other write actions (and reads) disabled,
+i.e. blocked.
+
+<p>If you are extending
+
+{@link javax.swing.text.AbstractDocument javax.swing.text.AbstractDocument },
+
+please note that just enclosing the <code>Runnable</code> block in
+calls to
+
+{@link javax.swing.text.AbstractDocument#writeLock() writeLock() }
+
+and
+
+{@link javax.swing.text.AbstractDocument#writeUnlock() writeUnlock() }
+
+will not do the trick - these calls do take out exclusive locks,
+however they specifically do not nest. This means that you cannot
+lock and then enter a runnable this way, because any modifications
+attempted within the runnable will throw an illegal state
+exception.  Also, the locking methods are final and cannot be
+advised to nest.  So you must find some other way to implement
+this, e.g. your own locks.
+
+<p>You must also implement
+
+{@link org.openide.text.NbDocument.WriteLockable#runAtomicAsUser(java.lang.Runnable) NbDocument.WriteLockable.runAtomicAsUser(...) },
+
+which is very similar but is invoked on behalf of user actions
+unrelated to whatever component created the guard blocks - e.g., this
+would be used to rename a method from the Explorer, in which case the
+rename ought to check that the renamed method is not guarded due to
+being used by the Form Editor. Thus, it should attempt to make
+modifications requested by the <code>Runnable</code>, locking out
+other modifications, but ensure that guard blocks are not violated.
+Any attempted violation should be prevented (or rolled back at the end
+of the runnable), and after the end of the runnable an appropriate
+exception should be thrown.
+
+<p>Note that while both methods in this interface ought to provide a
+transactional interface if at all possible - i.e., either succeed at
+executing the entire <code>Runnable</code>, or fail and leave the
+document untouched - the transactional aspect is much more important to
+implement properly for <code>runAtomicAsUser</code>. This is because
+it is quite possible for an innocent user action (e.g. attempting to
+rename a JavaBean property) to interfere with a guard block, and the
+document should <em>not</em> be left half-modified after such a
+mistake. On the other hand, a failure in the block of
+<code>runAtomic</code> is more likely to be an bug in some module,
+and not the user's fault; so perfect recovery is of course less
+important, as the bug should be fixed anyway.
+
+<p>There is currently no default convenience implementation of
+<code>runAtomicAsUser</code>, as any implementation may well be
+closely tied to how guard blocks are implemented in that particular
+editor - e.g. in Emacs there will be a quite idiosyncratic
+implementation.
+
+<h3 id="biases">Biases</h3>
+
+Please consider implementing
+
+{@link org.openide.text.NbDocument.PositionBiasable org.openide.text.NbDocument.PositionBiasable }
+
+and its
+
+{@link org.openide.text.NbDocument.PositionBiasable#createPosition(int,javax.swing.text.Position.Bias) createPosition(...) }
+
+method, to create a position marker which not only moves freely with
+insertions and deletions in nearby text, but also specifies the
+direction the marker will move to when text is inserted at that
+position.
+
+<p>If this is not done, NetBeans creates its own replacement.
+
+<h3 id="scrolling">Scrolling to display</h3>
+
+<p>NetBeans sometimes asks the editor to scroll the display so that a
+given line will be displayed. You should not need to do anything
+special to support this;
+
+{@link javax.swing.text.Caret#setDot(int) Caret.setDot() }
+
+will be called and ought to perform the scrolling appropriately.
+
+<h3 id="actions">Presentable actions</h3>
+
+It is desirable for the editor to present actions to the user that may
+be invoked on the document and may be accessed in various ways. For
+example, if your editor provides an
+
+{@link javax.swing.Action action }
+
+for reindenting a section of text, it is best if this action can be
+integrated into the rest of NetBeans consistently: a "Reindent" item
+under the "Edit" menu on the main toolbar, active when your editor has
+focus; a button with an icon representing reindentation placed onto
+the NetBeans toolbar; a context menu item within the editor pane named
+"Reindent"; a keyboard shortcut <code>Ctrl-R</code>; etc.
+
+<p>While it might be possible to add some of these things manually
+into the NetBeans action containers (like the "Main Window" entry in the
+Environment, visible in the Explorer), this is discouraged as that
+makes it more difficult for NetBeans to manage actions added by various
+modules.
+
+<p>Instead, you should use the <a
+href="@org-openide-actions@/org/openide/actions/doc-files/api.html">Actions API</a> to add
+
+{@link org.openide.util.actions.CallbackSystemAction CallbackSystemAction }s
+
+(e.g.) to your module.
+
+<h4>Default toolbar</h4>
+
+Although it is best to use the Actions API to specify in your module's
+manifest file which actions to install where, NetBeans may
+also create a toolbar attached to the editor window which will reflect
+all displayable actions supported by your editor, automatically. This
+may be better for less-commonly used actions which it would be
+inappropriate to install into the main control window.
+
+<p>You do not need to do much to support this editor toolbar: in the
+
+{@link javax.swing.text.EditorKit#getActions() getActions() }
+
+method of your editor kit, if there are any actions which are also
+
+{@link org.openide.util.actions.SystemAction SystemAction }s
+
+implementing
+
+{@link org.openide.util.actions.Presenter.Toolbar Presenter.Toolbar },
+
+then this interface will be used to get a
+
+{@link java.awt.Component java.awt.Component }
+
+which will be displayed in the editor toolbar. You are free to make
+this component be whatever you like, e.g. a button to run some
+routine, or a checkbox to toggle an option; just add the appropriate
+event listeners to it.
+
+<h4>Standard actions</h4>
+
+<p>A few basic editing commands you do <em>not</em> need to explicitly
+present to NetBeans; this will be done for you automatically. NetBeans
+tests whether an editor kit provides (from its
+<code>EditorKit.getActions()</code> method) any actions with certain
+names. Default instances of these are also available in the
+<code>DefaultEditorKit</code> class, but your actions will be
+recognized based on a call to
+
+<code>{@link javax.swing.Action#getValue(java.lang.String) getValue }({@link javax.swing.Action#NAME Action.NAME })</code>:</p>
+
+<table border=1>
+<caption>name to DefaultEditorKit field mappings</caption>
+<tr><th>Name</th><th>Static field in
+{@link javax.swing.text.DefaultEditorKit DefaultEditorKit }</th></tr>
+<tr><td><code>copy-to-clipboard</code></td><td><code>copyAction</code></td></tr>
+<tr><td><code>cut-to-clipboard</code></td><td><code>cutAction</code></td></tr>
+<tr><td><code>paste-from-clipboard</code></td><td><code>pasteAction</code></td></tr>
+</table>
+
+<p>There are a few more which unfortunately do not exist in the
+<code>DefaultEditorKit</code>, and therefore have no standard
+names. The following may be used:</p>
+
+<!-- XXX is this still right?
+possible want to say: undo/redo supported by your undo impl in the document
+all others are CallbackSystemAction's -> you must specifically enable them
+-->
+
+<table border=1>
+<caption>action names and their meanings</caption>
+<tr><th>Name</th><th>Description</th></tr>
+<tr><td><code>find</code></td><td>Pop up dialog to find a string in the text.</td></tr>
+<tr><td><code>replace</code></td><td>Pop up dialog to find &amp;
+replace a string in the text.</td></tr>
+<tr><td><code>goto</code></td><td>Pop up dialog to go to some place in
+the text, e.g. a specific line number.</td></tr>
+<tr><td><code>delete</code></td><td>Delete the selection, without
+affecting clipboard.</td></tr>
+<tr><td><code>undo</code></td><td>Undo action. See package
+{@link javax.swing.undo javax.swing.undo } for help. Currently not specially
+supported, except to call your action.</td></tr>
+<tr><td><code>redo</code></td><td>Redo action. Ditto.</td></tr>
+</table>
+
+<p>The corresponding items in the NetBeans "Edit" menu, and other
+standard invocations such as from the system toolbar, will
+automatically invoke these actions on your document, if you supply
+them. You should use
+
+{@link javax.swing.Action#isEnabled() Action.isEnabled() }
+
+to indicate whether your action is ready, and thus whether or not the
+corresponding UI elements should be grayed out.
+
+<h3 id="undo">Undo/redo support</h3>
+
+It is desirable for your document's user-level edit actions to implement
+
+{@link javax.swing.undo.UndoableEdit UndoableEdit },
+
+so that NetBeans can smoothly provide Undo/Redo support for the editor
+from the standard places (e.g. in the Edit menu). Note that
+
+{@link javax.swing.text.AbstractDocument AbstractDocument },
+
+for example, already provides this support.
+
+<h3 id="cust">Customization</h3>
+
+This API does not provide any special mechanism for allowing the user
+to customize aspects of the editor's operation from the GUI; if you
+want to do this, please use <code>NbPreferences</code> or similar.
+
+<h3 id="install">Installing</h3>
+
+It should be straightforward to install the new editor -
+you will make a JAR file containing a manifest with attributes
+recognized by NetBeans as constituting a <a
+href="@org-openide-modules@/org/openide/modules/doc-files/api.html">module</a>, and just call
+
+{@link javax.swing.JEditorPane#registerEditorKitForContentType(java.lang.String,java.lang.String) javax.swing.JEditorPane.registerEditorKitForContentType(...) },
+
+and NetBeans should subsequently use it.
+
+<h4>Implementing a module with editor support</h4>
+
+<!-- XXX is Editor/EditorKits/ or whatever an API yet? -->
+
+<p>It is possible that there will be special support in the Modules
+API for registering editors. Although doing it manually in the
+module's
+
+{@link org.openide.modules.ModuleInstall#installed() installed() }
+
+method is not difficult, properly the module should also restore the
+original editor kit for each content type upon an uninstall, and
+ideally there would be a user-visible control panel permitting
+selection of the editor for each content type from among those
+claiming to support it.
+
+<p>This is not likely to be done unless it turns out to be popular to
+have multiple editors installed, and conflicts become a problem.
+
+<p>In the meantime, please refer to the
+
+<a href="@org-openide-modules@/org/openide/modules/doc-files/api.html">Modules API</a>
+
+for instructions on creating a module to contain your editor.</p>
+
+<div class="nonnormative">
+
+<h4>Registering unusual MIME types</h4>
+
+If your editor has support for an unusual MIME type that is not
+currently recognized, you may wish to use the
+
+<a href="@org-openide-filesystems@/org/openide/filesystems/doc-files/api.html#mimerp">MIME resolution</a>
+
+infrastructure in the Filesystems API to help your files be
+recognized. Additionally,
+
+{@link org.openide.text.CloneableEditorSupport#setMIMEType(java.lang.String) CloneableEditorSupport.setMIMEType(String) }
+
+may be used to control the MIME type of an editor kit regardless of
+the type of the underlying file.
+
+</div>
+
+<hr>@FOOTER@
+
+</body>
+</html>

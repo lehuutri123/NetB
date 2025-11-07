@@ -1,0 +1,164 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<!--
+
+    Licensed to the Apache Software Foundation (ASF) under one
+    or more contributor license agreements.  See the NOTICE file
+    distributed with this work for additional information
+    regarding copyright ownership.  The ASF licenses this file
+    to you under the Apache License, Version 2.0 (the
+    "License"); you may not use this file except in compliance
+    with the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing,
+    software distributed under the License is distributed on an
+    "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    KIND, either express or implied.  See the License for the
+    specific language governing permissions and limitations
+    under the License.
+
+-->
+<HTML>
+<HEAD>
+<TITLE>Lookup Library API</TITLE>
+<link rel="Stylesheet" href="@TOP@/resource-files/prose.css" type="text/css" title="NetBeans Open APIs Style">
+</HEAD>
+<BODY>
+<H1>Lookup library API</H1>
+<p>
+This document describes usage of the API provided by the Lookup Library. In this
+document we assume that someone has already provided us with a lookup
+implementation (for those seeking how to write a lookup implementation please
+check <A href="lookup-spi.html">the SPI document</A>).
+
+<H2> Getting the lookup </H2>
+
+The first question you might ask is this: how can I get hold of a
+lookup instance? There are basically two ways how you can get it.
+
+<H3> Global lookup </H3>
+As you can see in the {@link org.openide.util.Lookup Lookup } Javadoc there is a static method
+
+{@link org.openide.util.Lookup#getDefault() public static Lookup getDefault() }
+
+The object returned from this method is
+a global lookup that can serve as a central place for registering services.
+The default implementation is a lookup that implements
+<a href="https://docs.oracle.com/javase/1.5.0/docs/guide/jar/jar.html#Service%20Provider">
+the JDK JAR services</A>
+mechanism and delegates to <samp>META-INF/services/name.of.Class</samp> files.
+<P>
+If you want to add your class to this lookup just create a file in your
+jar file under the <code>META-INF</code> directory (e.g. <samp>META-INF/services/com.my.APIClass</samp>)
+and let the file contain only one line of text
+
+<pre>com.foo.impl.ImplOfTheAPI</pre>
+
+<p>(This is more easily done using the <code>@ServiceProvider</code> annotation.)</p>
+
+The following code will return you a newly created instance of
+<code>com.foo.impl.ImplOfTheAPI</code>:
+
+<PRE>
+   <span class="keyword">import</span> org.openide.util.Lookup;
+   return Lookup.getDefault().lookup(com.my.APIClass.class);
+</PRE>
+
+<H3> Local lookup </H3>
+
+This is just a reminder that whenever you find a method called getLookup
+or similar returning a lookup instance, the provided lookup is <EM>not</EM> the
+general lookup described in the previous paragraph. Rather, it is a private lookup
+implementation that is usually bound to the object you invoked the method on.
+
+<H2> Use of Lookup.Template and Lookup.Result </H2>
+
+There are more ways how you can ask lookup besides the variant with one class
+parameter. If you want more functionality, you have to implement the interface
+Lookup.Template and pass an instance of such object to the lookup call.
+<p>
+<EM>Note:</EM> If you use Lookup.Template, the object returned from the lookup is
+<EM>not</EM> the object you are looking for but rather a result object
+(Lookup.Result). You can call methods on such a result object to get the actual
+results.
+<p>
+Let's examine following example:
+
+<pre>
+        <span class="keyword">import</span> org.openide.util.Lookup;
+
+        <span class="type">Lookup</span> <span class="variable-name">lookup</span> = ...;
+        Lookup.<span class="type">Template</span> <span class="variable-name">template</span> = <span class="keyword">new</span> Lookup.<span class="type">Template</span>(MyService.<span class="keyword">class</span>);
+        Lookup.<span class="type">Result</span> <span class="variable-name">result</span> = lookup.lookup(template);
+        <span class="type">Collection</span> <span class="variable-name">c</span> = result.allInstances();
+        <span class="keyword">for</span> (<span class="type">Iterator</span> <span class="variable-name">i</span> = c.iterator(); i.hasNext(); ) {
+            <span class="type">MyService</span> <span class="variable-name">s</span> = (<span class="type">MyService</span>)i.next();
+            s.callMyService();
+        }
+</pre>
+
+In this example the call to method lookup(...) returns immediately because the
+result object can be constructed even without real results. The first time you
+ask for the result object by calling r.allInstances(), the lookup has to supply you
+the real results and this method can block until the required data are really
+available.
+<p>
+If you are not interested in all objects as in the previous example, you can use the
+template to ask for one resulting object (wrapped in special Item instance):
+<pre>
+        <span class="keyword">import</span> org.openide.util.Lookup;
+
+        <span class="type">Lookup</span> <span class="variable-name">lookup</span> = ...;
+        Lookup.<span class="type">Template</span> <span class="variable-name">template</span> = <span class="keyword">new</span> Lookup.<span class="type">Template</span>(MyService.<span class="keyword">class</span>);
+        Lookup.<span class="type">Item</span> <span class="variable-name">item</span> = lookup.lookupItem(template);
+        <span class="type">MyService</span> <span class="variable-name">s</span> = (<span class="type">MyService</span>)item.getInstance();
+        s.callMyService();
+</pre>
+
+Again, the Item object can construct the real instance only if you call
+getInstance. The item can be useful even without calling getInstance - you can get
+its display name or an unique id. You can use this information, for example, for
+constructing menu items without the need to instantiate (or even load!)
+the class implementing the functionality. Only when the real functionality is
+needed (e.g. the user has selected the menu item) you can call getInstance
+and call the real meat of the implementation.
+
+<H2> Listenning on lookup changes </H2>
+There is one additional piece of functionality bound to the Lookup.Result object worth
+mentioning: you can attach a listener to it and be informed about any changes in
+the lookup. This might be extremly usefull when the lookup dynamically changes
+(from other threads). The listener can keep state of your object up-to-date even
+in cases where the lookup changes asynchronously.
+<p>
+So here is some sample code using the listenner:
+
+<pre>
+        <span class="keyword">import</span> org.openide.util.Lookup;
+        <span class="keyword">import</span> org.openide.util.LookupListener;
+        <span class="keyword">import</span> org.openide.util.LookupEvent;
+
+        <span class="type">Lookup</span> <span class="variable-name">lookup</span> = ...;
+        Lookup.<span class="type">Template</span> <span class="variable-name">template</span> = <span class="keyword">new</span> Lookup.<span class="type">Template</span>(MyService.<span class="keyword">class</span>);
+        <span class="keyword">final</span> <span class="variable-name">Lookup</span>.<span class="type">Result</span> <span class="variable-name">result</span> = lookup.lookup(template);
+        result.addLookupListener(<span class="keyword">new</span> <span class="type">LookupListener</span>() {
+            <span class="keyword">public</span> <span class="type">void</span> <span class="function-name">resultChanged</span>(<span class="type">LookupEvent</span> <span class="variable-name">e</span>) {
+                reaction(result);
+            }
+        });
+        reaction(result);
+    }
+    <span class="keyword">private</span> <span class="keyword">static</span> <span class="type">void</span> <span class="function-name">reaction</span>(Lookup.<span class="type">Result</span> <span class="variable-name">r</span>) {
+        <span class="keyword">for</span> (<span class="type">Iterator</span> <span class="variable-name">i</span> = r.allInstances().iterator(); i.hasNext(); ) {
+            <span class="type">MyService</span> <span class="variable-name">s</span> = (<span class="type">MyService</span>)i.next();
+            s.callMyService();
+        }
+    }
+</pre>
+
+Please note that we first attach a listener and then call the reaction method.
+This ensures that we always get the newest possible state. Also you must be
+careful in the reaction method since it can be called from two different
+threads simultaneously (your code has to be prepared for this).
+</BODY>
+</HTML>

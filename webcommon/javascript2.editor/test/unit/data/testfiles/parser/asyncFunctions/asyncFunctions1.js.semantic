@@ -1,0 +1,10 @@
+export default {
+
+  |>FIELD:path<|: '/',
+
+  |>CUSTOM2:async<| |>METHOD:action<|() {
+    |>CUSTOM2:const<| component = |>CUSTOM2:await<| next();
+
+  },
+
+};
