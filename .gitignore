@@ -1,0 +1,9 @@
+*.class
+build/
+dist/
+nbproject/private/
+*.jar
+*.war
+*.ear
+*.zip
+nbbuild/
